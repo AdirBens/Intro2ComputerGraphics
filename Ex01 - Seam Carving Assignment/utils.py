@@ -73,10 +73,12 @@ class SeamImage:
             Use NumpyPy vectorized matrix multiplication for high performance.
             To prevent outlier values in the boundaries, we recommend to pad them with 0.5
         """
-        grayscale_img = np.dot(np_img, self.gs_weights)
+
+        grayscale_img = np.copy(np_img)
+        grayscale_img = grayscale_img @ self.gs_weights
 
         # Add padding with 0.5 to prevent outlier values in the boundaries
-        grayscale_img = np.pad(grayscale_img, ((1, 1), (1, 1), (0, 0)), mode='constant', constant_values=0.5)
+        grayscale_img[0, :], grayscale_img[-1, :], grayscale_img[:, 0], grayscale_img[:, -1] = 0.5, 0.5, 0.5, 0.5
 
         return grayscale_img
 
@@ -92,37 +94,18 @@ class SeamImage:
             - keep in mind that values must be in range [0,1]
             - np.gradient or other off-the-shelf tools are NOT allowed, however feel free to compare yourself to them
         """
-        # Calculate gradients in x and y directions using Sobel operators
-        grad_x = np.zeros_like(self.gs)
-        grad_y = np.zeros_like(self.gs)
 
-        # Calculate gradients for all pixels except the boundaries
-        for i in range(1, self.h):
-            for j in range(1, self.w):
-                # Calculate gradients in x direction
-                grad_x[i, j] = self.gs[i + 1, j] - self.gs[i, j]
-                # Calculate gradients in y direction
-                grad_y[i, j] = self.gs[i, j + 1] - self.gs[i, j]
+        # Calculate gradients on x and y axes
+        grad_x = np.subtract(self.resized_gs[:, :, 0], np.roll(self.resized_gs[:, :, 0], -1, axis=1))
+        grad_y = np.subtract(self.resized_gs[:, :, 0], np.roll(self.resized_gs[:, :, 0], -1, axis=0))
 
         # Calculate gradient magnitude
-        gradient_magnitude = np.sqrt(grad_x ** 2 + grad_y ** 2)
-
-        # Normalize values to range [0, 1]
-        gradient_magnitude /= np.max(gradient_magnitude)
+        gradient_magnitude = np.sqrt(np.add(np.square(grad_x), np.square(grad_y)))
 
         return gradient_magnitude
 
     def calc_M(self):
-        """ Calculates the matrix M discussed in lecture (with forward-looking cost)
-
-        Returns:
-            An energy matrix M (float32) of shape (h, w)
-
-        Guidelines & hints:
-            As taught, the energy is calculated from top to bottom.
-            You might find the function 'np.roll' useful.
-        """
-
+        pass
 
     def seams_removal(self, num_remove):
         pass
@@ -180,7 +163,21 @@ class VerticalSeamImage(SeamImage):
             As taught, the energy is calculated from top to bottom.
             You might find the function 'np.roll' useful.
         """
-        raise NotImplementedError("TODO: Implement SeamImage.calc_M")
+        M = np.copy(self.E)
+
+        # Calculate for each row starting from the second row
+        for i in range(1, self.h):
+            # Shift the previous row of M to the left and right
+            right = np.roll(M[i - 1, :], 1)
+            left = np.roll(M[i - 1, :], -1)
+
+            # Fix the shifted values at the edges
+            left[0] = M[i - 1, 0]
+            right[-1] = M[i - 1, -1]
+
+            M[i, :] += np.min([left, M[i - 1, :], right], axis=0)
+        print(self.E)
+        return M
 
     # @NI_decor
     def seams_removal(self, num_remove: int):
@@ -207,7 +204,17 @@ class VerticalSeamImage(SeamImage):
             - removing seams couple of times (call the function more than once)
             - visualize the original image with removed seams marked (for comparison)
         """
-        raise NotImplementedError("TODO: Implement SeamImage.seams_removal")
+        for i in range(num_remove):
+            # Initialize matrices
+            self.init_mats()
+            # Fill in the backtrack matrix
+            self.backtrack_seam()
+            # Seam backtracking
+            self.remove_seam()
+            # Index update
+            self.update_ref_mat()
+            self.seam_balance += 1
+
 
     def paint_seams(self):
         for s in self.seam_history:
@@ -240,13 +247,27 @@ class VerticalSeamImage(SeamImage):
         Parameters:
             num_remove (int): umber of vertical seam to be removed
         """
-        raise NotImplementedError("TODO: Implement SeamImage.seams_removal_vertical")
+        self.seams_removal(num_remove)
 
     # @NI_decor
     def backtrack_seam(self):
         """ Backtracks a seam for Seam Carving as taught in lecture
         """
-        raise NotImplementedError("TODO: Implement SeamImage.backtrack_seam_b")
+        seam_path = np.zeros(self.h, dtype=int)
+        seam_path[-1] = np.argmin(self.M[-1, :])
+        for i in range(self.h - 2, -1, -1):
+            prev_index = seam_path[i + 1]
+            search_range = range(max(prev_index - 1, 0), min(prev_index + 2, self.w))
+
+            # Localizing the search range for np.argmin, then adjusting back to the full image's indexing
+            local_min_index = np.argmin(self.M[i, search_range]) + max(prev_index - 1, 0)
+            seam_path[i] = local_min_index
+        for i in range(len(seam_path)):
+            self.backtrack_mat[i, seam_path[i]] = 1
+        print(self.M)
+
+
+
 
     # @NI_decor
     def remove_seam(self):
@@ -255,7 +276,9 @@ class VerticalSeamImage(SeamImage):
         Guidelines & hints:
         In order to apply the removal, you might want to extend the seam mask to support 3 channels (rgb) using: 3d_mak = np.stack([1d_mask] * 3, axis=2), and then use it to create a resized version.
         """
-        raise NotImplementedError("TODO: Implement SeamImage.remove_seam")
+        threeD_mask = np.stack([self.mask] * 3, axis=2)
+
+
 
     # @NI_decor
     def seams_addition(self, num_add: int):
