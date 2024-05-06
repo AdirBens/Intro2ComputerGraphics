@@ -12,9 +12,8 @@ def reflected(vector, normal):
     reflected_vector = vector - 2 * np.dot(vector, normal) * normal
     return reflected_vector
 
+
 ## Lights
-
-
 class LightSource:
     def __init__(self, intensity):
         self.intensity = intensity
@@ -59,7 +58,8 @@ class PointLight(LightSource):
     # This function returns the light intensity at a point
     def get_intensity(self, intersection):
         d = self.get_distance_from_light(intersection)
-        return self.intensity / (self.kc + self.kl*d + self.kq * (d**2))
+        f_att = 1 / (self.kc + self.kl * d + self.kq * (d**2))
+        return self.intensity * f_att
 
 
 class SpotLight(LightSource):
@@ -152,74 +152,42 @@ class Triangle(Object3D):
         self.a = np.array(a)
         self.b = np.array(b)
         self.c = np.array(c)
+
         self.edge1 = self.b - self.a
         self.edge2 = self.c - self.a
         self.normal = self.compute_normal(a)
 
-    # def intersect(self, ray: Ray):
-    #     triangle_plane = Plane(self.normal, self.a)
-    #     intersection = triangle_plane.intersect(ray)
-    #     if intersection is None:
-    #         return None
-    #
-    #     intersection_point = ray.origin + intersection[0] * ray.direction
-    #     if self.barycentric_intersection(intersection_point):
-    #         return intersection
-    #     return None
-    #
-    # def barycentric_intersection(self, intersection_point):
-    #     p = intersection_point
-    #     pa = self.a - p
-    #     pb = self.b - p
-    #     pc = self.c - p
-    #
-    #     area = 0.5 * np.linalg.norm(np.cross(self.edge1, self.edge2))
-    #     alpha = (np.linalg.norm(np.cross(pb, pc)) / 2) * (1 / area)
-    #     beta = (np.linalg.norm(np.cross(pc, pa)) / 2) * (1 / area)
-    #     gamma = 1 - alpha - beta
-    #
-    #     print(alpha + beta + gamma)
-    #     return 0 <= alpha <= 1 and 0 <= beta <= 1 and 0 <= gamma <= 1 and np.abs(alpha + beta + gamma - 1) < 1e-6
-
-
     def intersect(self, ray: Ray):
-        # Vectors for two edges sharing vertex A
-        AB = self.b - self.a
-        AC = self.c - self.a
-
-        # Begin calculating the determinant - also used to calculate U parameter
-        pvec = np.cross(ray.direction, AC)
-        det = np.dot(AB, pvec)
-
-        # If the determinant is near zero, the ray lies in the plane of the triangle
-        if abs(det) < 1e-8:
+        triangle_plane = Plane(self.normal, self.c)
+        intersection = triangle_plane.intersect(ray)
+        if intersection is None:
             return None
 
-        inv_det = 1.0 / det
+        distance, _ = intersection
+        intersection_point = ray.origin + (distance * ray.direction)
+        if self.barycentric_intersection(intersection_point):
+            return intersection
+        return None
 
-        # Calculate the distance from vertex A to the ray origin
-        tvec = ray.origin - self.a
+    def barycentric_intersection(self, intersection_point):
+        p = intersection_point
+        pa = p - self.a
+        pb = p - self.b
+        pc = p - self.c
 
-        # Calculate U parameter and test bounds
-        u = np.dot(tvec, pvec) * inv_det
-        if u < 0 or u > 1:
-            return None
+        # Calculate the area of the triangle
+        area_ABC = np.linalg.norm(np.cross(self.edge1, self.edge2))
+        area_PBC = np.linalg.norm(np.cross(pb, pc))
+        area_PCA = np.linalg.norm(np.cross(pc, pa))
+        area_PAB = np.linalg.norm(np.cross(pa, pb))
 
-        # Prepare to test V parameter
-        qvec = np.cross(tvec, AB)
+        # Barycentric coordinates
+        alpha = area_PBC / area_ABC
+        beta = area_PCA / area_ABC
+        gamma = area_PAB / area_ABC
 
-        # Calculate V parameter and test bounds
-        v = np.dot(ray.direction, qvec) * inv_det
-        if v < 0 or u + v > 1:
-            return None
-
-        distance = np.dot(AC, qvec) * inv_det
-
-        if distance <= 0:  # Check if the intersection is in the positive ray direction
-            return None
-
-        return distance, self
-
+        # Check if point is inside the triangle
+        return 0 <= alpha <= 1 and 0 <= beta <= 1 and 0 <= gamma <= 1 and np.abs(alpha + beta + gamma - 1) < 1e-8
 
     # computes normal to the triangle surface. Pay attention to its direction!
     def compute_normal(self, _):
@@ -260,12 +228,12 @@ A /&&&&&&&&&&&&&&&&&&&&\ B &&&/ C
     def create_triangle_list(self):
         triangle_list = []
         t_idx = [
-                [0,1,3],
-                [1,2,3],
-                [0,3,2],
-                [4,1,0],
-                [4,2,1],
-                [2,4,0]]
+                [0, 1, 3],
+                [1, 2, 3],
+                [0, 3, 2],
+                [4, 1, 0],
+                [4, 2, 1],
+                [2, 4, 0]]
 
         for triangle_idx in t_idx:
             a = self.v_list[triangle_idx[0]]
